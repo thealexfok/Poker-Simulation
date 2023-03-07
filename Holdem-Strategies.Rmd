@@ -1,0 +1,323 @@
+---
+title: "Hold'em Strategies"
+author: "Alex"
+date: "2023-02-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE)
+library(tidyr)
+library(dplyr)
+options(dplyr.summarise.inform = FALSE)
+library(scales)
+library(ggplot2)
+library(knitr)
+```
+
+# Overview
+
+In Texas Hold'em, two cards, known as hole cards, are dealt face down to each player, and then five community cards are dealt face up in three stages. Each player seeks the best five card poker hand from any combination of the seven cards; the five community cards and their two hole cards. This document is a game simulation on Texas Hold'em in a heads up(1v1) scenario. The goal of this simulation to test the better strategy between only playing if player has a pair or two cards of the same suit and when player has two cards that is less than 4 cards apart.
+
+# Setup
+
+The simulation setup creates a deck of 52 cards for each simulated hand. 5 community cards, 2player cards and 2 enemy cards are dealt from each deck for every hand. This cards are wrangled into a data frame that includes the card value, player and hand. Showing the first 2 hands.
+
+```{r}
+no_of_hands= 10000
+deck <- data.frame(
+  suit = rep(c("Diamonds", "Clubs", "Hearts", "Spades"), each =13),
+  number = rep(c("ACE",2:10,"JACK","QUEEN","KING"), times =4),
+  value = rep(c(14,2:13), each = 4)
+)
+
+players = c("Me","Me","Enemy","Enemy","Community","Community","Community","Community","Community")
+
+for (x in 1:no_of_hands) {
+  if (x == 1){
+    Game <- data.frame(
+  hand = rep(x,each = 9),
+  player = players,
+  sample_n(deck, 9,replace = FALSE))
+  }
+  else{
+    temp <- data.frame(
+  hand = rep(x,each = 9),
+  player = players,
+  sample_n(deck, 9,replace = FALSE))
+  Game <-bind_rows(Game,temp)
+  }}
+head(Game,18)
+```
+
+# Checking the winner
+
+Here are the ranking of combinations to determine the winner. (From Strongest to weakest)
+
+1. Royal flush
+A, K, Q, J, 10, all the same suit.
+
+2. Straight flush
+Five cards in a sequence, all in the same suit.
+
+3. Four of a kind
+All four cards of the same number.
+
+4. Full house
+Three of a kind with a pair.
+
+5. Flush
+Any five cards of the same suit, but not in a sequence.
+
+6. Straight
+Five cards in a sequence, but not of the same suit.
+
+7. Three of a kind
+Three cards of the same number.
+
+8. Two pair
+Two different pairs.
+
+9. Pair
+Two cards of the same number.
+
+10. High Card
+When you haven't made any of the hands above, the highest card wins.
+
+Creating a function to determine the winner.
+
+```{r}
+# Calculate the value of a hand
+hand_value <- function(hand) {
+  # Create a subset of the hand with only the community cards
+  community_cards <- hand[hand$player == "Community", ]
+  # Sort the community cards by their value
+  community_cards <- community_cards[order(community_cards$value), ]
+  # Combine the two cards in each player's hand
+  player_hands <<- split(hand[hand$player != "Community", ], hand[hand$player != "Community", ]$player)
+  player_hands <- lapply(player_hands, function(x) x[order(x$value), ][1:2, ])
+  player_hands_community <- lapply(player_hands, function(x) rbind(x,community_cards))
+  # Check if each player has a royal flush
+  has_royal_flush <<- sapply(player_hands_community, function(x) {
+    royal <- (all(x$number %in% c("ACE", "KING", "QUEEN", "JACK", 10)))
+              
+    count <- x %>% group_by(hand,suit) %>% 
+  summarize(matches = n()) %>% mutate(flush_me = matches >= 5) %>% filter(flush_me == TRUE) %>% nrow()
+    
+    if (royal == TRUE & count>0) return(1) else return(0)
+  })
+  
+  # Check if each player has a straight flush
+  has_straight_flush <<- sapply(player_hands_community, function(x) {
+    if (any(x$number %in% c("ACE"))){
+      tempace <- x[x$number %in% c("ACE"),]
+      tempx <- x
+      rbind(tempx, tempace)
+      scount <- tempx %>% arrange(hand,number) %>% group_by(hand, value) %>%
+  summarize(matches = n()) %>% mutate(straight = lag(value,4, default = -10)== value-4) %>% filter(straight == TRUE)%>% nrow()
+    }
+    else{
+      scount <- x %>% arrange(hand,number) %>% group_by(hand, value) %>%
+  summarize(matches = n()) %>% mutate(straight = lag(value,4, default = -10)== value-4) %>% filter(straight == TRUE)%>% nrow()
+    }
+    
+    
+    fcount <- x %>% group_by(hand,suit) %>% 
+  summarize(matches = n()) %>% mutate(flush_me = matches >= 5) %>% filter(flush_me == TRUE) %>% nrow()
+    
+    if (scount>0 & fcount>0) return(1) else return(0)
+  })
+  
+  # Check if each player has four of a kind
+  has_four_of_a_kind <<- sapply(player_hands_community, function(x) {
+    count <- x %>% group_by(hand,number) %>% summarize(matches = n())%>% mutate(four_of_a_kind = matches == 4) %>% filter(four_of_a_kind == TRUE) %>% nrow() 
+    
+    if (count >0) return(1) else return(0)
+  })
+  
+  # Check if each player has a full house
+  has_full_house <<- sapply(player_hands_community, function(x) {
+    df_a <<- x %>% group_by(hand, value) %>% summarize(counts = n()) %>% filter(counts == 3)
+    if (length(df_a$value) == 0) return (0) else{
+
+    df_a <- df_a %>% filter(value == max(value))
+    df_b <- x %>% filter(value != df_a$value) %>% group_by(hand, value) %>% summarize(counts = n()) %>% filter(counts >= 2)
+    
+    is_fullhouse <- (length(df_a$value) + length(df_b$value) >= 2)
+    
+    if (is_fullhouse == TRUE) return(1) else return(0)
+  }})
+  
+  # Check if each player has a flush
+  has_flush <<- sapply(player_hands_community, function(x) {
+    count <- x %>% group_by(hand,suit) %>% 
+  summarize(matches = n()) %>% mutate(flush_me = matches >= 5) %>% filter(flush_me == TRUE) %>% nrow()
+    
+    if (count>0) return(1) else return(0)
+  })
+  
+  # Check if each player has a straight
+  has_straight <<- sapply(player_hands_community, function(x) {
+    if (any(x$number %in% c("ACE"))){
+      tempace <- x[x$number %in% c("ACE"),]
+      tempx <- x
+      rbind(tempx, tempace)
+      count <- tempx %>% arrange(hand,number) %>% group_by(hand, value) %>%
+  summarize(matches = n()) %>% mutate(straight = lag(value,4, default = -10)== value-4) %>% filter(straight == TRUE)%>% nrow()
+    }
+    else{
+      count <- x %>% arrange(hand,number) %>% group_by(hand, value) %>%
+  summarize(matches = n()) %>% mutate(straight = lag(value,4, default = -10)== value-4) %>% filter(straight == TRUE)%>% nrow()
+    }
+    
+    
+    if (count>0)  return(1) else return(0)
+  })
+  
+  #Check if each player has three of a kind
+  has_three_of_a_kind <<- sapply(player_hands_community, function(x) {
+    count <- x %>% group_by(hand,number) %>% summarize(matches = n())%>% mutate(three_of_a_kind = matches == 3) %>% filter(three_of_a_kind == TRUE) %>% nrow() 
+    
+    if (count >0) return(1) else return(0)
+  })
+  
+  #Check if each player has two pairs
+  has_two_pairs <<- sapply(player_hands_community, function(x) {
+    count <- x %>% group_by(hand,number) %>% summarize(matches = n())%>%
+  filter(matches >= 2) %>% group_by(hand) %>% summarize(matches_two = n()) %>%  mutate(two_pair = matches_two >= 2) %>%
+  filter(two_pair == TRUE) %>% nrow()
+    
+    if (count>0) return(1) else return(0)
+  })
+  
+  #Check if each player has one pair
+  has_one_pair <<- sapply(player_hands_community, function(x) {
+    count <- x %>% group_by(hand,number) %>% summarize(matches = n())%>% mutate(pair = matches >= 2) %>% filter(pair == TRUE) %>% nrow() 
+    
+    if (count >0) return(1) else return(0)
+  })
+  
+  #Calculate high card of each hand
+  hand_strength <<- sapply(player_hands, function(x) {
+    max(x$value)
+  })
+  
+  #Determine the winner
+  winner <- ifelse(sum(has_royal_flush) > 0, 
+                   names(has_royal_flush[has_royal_flush == 1]), 
+            ifelse(sum(has_straight_flush) > 0,
+                   ifelse(sum(has_straight_flush) > 1,           names(which.max(hand_strength)),
+                          names(has_straight_flush[has_straight_flush == 1])),
+            ifelse(sum(has_four_of_a_kind) > 0,
+                   ifelse(sum(has_four_of_a_kind) > 1,           names(which.max(hand_strength)),
+                          names(has_four_of_a_kind[has_four_of_a_kind == 1])),
+            ifelse(sum(has_full_house) > 0, 
+                   ifelse(sum(has_full_house) > 1,           names(which.max(hand_strength)),
+                          names(has_full_house[has_full_house == 1])), 
+            ifelse(sum(has_flush) > 0, 
+                   ifelse(sum(has_flush) > 1,           
+names(which.max(hand_strength)),
+                          names(has_flush[has_flush == 1])), 
+            ifelse(sum(has_straight) > 0, 
+                   ifelse(sum(has_straight) > 1,           names(which.max(hand_strength)),
+                          names(has_straight[has_straight == 1])), 
+            ifelse(sum(has_three_of_a_kind) > 0,
+                   ifelse(sum(has_three_of_a_kind) > 1,           names(which.max(hand_strength)),
+                          names(has_three_of_a_kind[has_three_of_a_kind == 1])), 
+            ifelse(sum(has_two_pairs) > 0, 
+                   ifelse(sum(has_two_pairs) > 1,           names(which.max(hand_strength)),
+                          names(has_two_pairs[has_two_pairs == 1])), 
+            ifelse(sum(has_one_pair) > 0, 
+                   ifelse(sum(has_one_pair) > 1,           names(which.max(hand_strength)),
+                          names(has_one_pair[has_one_pair == 1])),
+            names(which.max(hand_strength)))))))))))
+
+return(winner)
+}
+
+firsthandwinner <- hand_value(Game[Game$hand==1,])
+testwinner <- hand_value(Game[Game$hand==15,])
+
+#doing it for all hands
+for (i in 1:no_of_hands){
+  Game$winner[Game$hand==i]<- hand_value(Game[Game$hand==i,])
+}
+
+
+winners <- by(Game, Game$hand, hand_value)
+winnersdf <- data.frame(winner = table(winners))
+winningpercentage <- percent(winnersdf$winner.Freq[winnersdf$winner.winners=="Me"]/no_of_hands)
+table(winners)
+```
+
+Winner of the first hand is `r firsthandwinner`.
+Total winning percentage  is `r winningpercentage`.
+
+
+# Strategy1
+Only go when two cards are the same suit or same number
+
+```{r}
+strategy1 <- function(Game) {
+  
+  winnerdf <- Game %>% filter(player== "Me"& winner == "Me") %>% group_by(hand,number) %>% summarize(matches = n())%>% mutate(pair = matches >= 2) %>% filter(pair == TRUE)%>% distinct()
+  
+  pairwins <- nrow(winnerdf)
+  
+  winnerdf <- Game %>% filter(player== "Me"& winner == "Me") %>% group_by(hand,suit) %>% summarize(matches = n())%>% mutate(samesuit = matches >= 2)%>% filter(samesuit == TRUE)%>% distinct()
+  
+  samesuitwins <- nrow(winnerdf)
+  
+  totalwin <<- Game %>% group_by(hand)%>% filter(player== "Me"& winner == "Me") %>% select(player,winner) %>% distinct() %>%nrow()
+  
+  strategy1percentage <<- percent((pairwins+samesuitwins)/totalwin)
+  
+  return(strategy1percentage)
+}
+
+strategy1(Game)
+```
+
+Winning percentage with strategy1 is `r strategy1percentage` out of total wins.
+
+# Strategy2
+Only go when the difference between the cards is less than or equals to 4.
+
+```{r}
+strategy2 <- function(Game) {
+  
+  #TODO Ace
+  winnerdf <- Game %>% filter(player== "Me" & winner == "Me")%>% arrange(hand,value) %>% group_by(hand, value) %>%
+  summarize(matches = n()) %>% mutate(previous = lag(value,1, default = -10)) %>% mutate(difference = (value - lag(value,1, default = -10)) <=4)%>% filter(value == max(value)) %>% filter(difference == TRUE) %>% select(hand,difference)%>% distinct()
+  
+  littledifferencewins <- nrow(winnerdf)
+  
+  totalwin <<- Game %>% group_by(hand)%>% filter(player== "Me"& winner == "Me") %>% select(player,winner) %>% distinct() %>%nrow()
+  
+  strategy2percentage <<- percent(littledifferencewins/totalwin)
+  
+  return(strategy2percentage)
+}
+
+strategy2(Game)
+```
+
+Winning percentage with strategy2 is `r strategy2percentage` out of total wins.
+
+# Conclusion
+
+```{r}
+strategydf <- data.frame(strategy = c("Strategy 1","Strategy 2"), winningpercentage = c(strategy1percentage,strategy2percentage))
+
+
+
+
+ggplot(strategydf, aes(x = strategy, y = winningpercentage)) + geom_bar(stat="identity")
+```
+
+
+The percentage of winning for `r strategydf$strategy[strategydf$winningpercentage == max(strategydf$winningpercentage)]` is higher with `r max(strategydf$winningpercentage)` chance of all the winning hands.
+
+
+
+
